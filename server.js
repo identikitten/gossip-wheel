@@ -84,8 +84,12 @@ const SEQUENTIAL_TEST = process.env.SEQUENTIAL_TEST === '1';
 let nextTestPrize = 0;
 
 const content = JSON.parse(fs.readFileSync(path.join(__dirname, 'content.json'), 'utf8'));
-const submissionFile = path.join(__dirname, 'submissions.jsonl');
-const answerFile = path.join(__dirname, 'answers.jsonl'); // ??? responses are not gossip
+// Railway: set DATA_DIR=/data and mount a persistent volume at /data.
+// Locally, files continue to be saved in the project directory.
+const dataDir = process.env.DATA_DIR || __dirname;
+fs.mkdirSync(dataDir, { recursive: true });
+const submissionFile = path.join(dataDir, 'submissions.jsonl');
+const answerFile = path.join(dataDir, 'answers.jsonl'); // ??? responses are not gossip
 
 // One physical wheel. Phone sessions are indexed by unguessable tokens.
 const sessions = new Map();
@@ -135,7 +139,7 @@ function messageFor(prize, session) {
 
 // Today's gossip is a snapshot of submissions, excluding ??? answers.
 // Submissions remain unapproved until an organizer reviews them.
-const stateFile = path.join(__dirname, 'prize-state.json');
+const stateFile = path.join(dataDir, 'prize-state.json');
 let persistent = { releasedGossip: [], jackpotDecisions: {} };
 try { persistent = { ...persistent, ...JSON.parse(fs.readFileSync(stateFile, 'utf8')) }; } catch (_) {}
 const releasedGossip = persistent.releasedGossip;

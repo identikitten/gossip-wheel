@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spin the Gossip Wheel</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="kiosk">
+  <div id="rain" aria-hidden="true"></div>
+  <main>
+    <h1>Spin the Gossip Wheel</h1>
+    <p>Spin the Wheel</p>
+    <button id="enable-sound" type="button">Enable sound</button>
+
+    <div class="wheel-container">
+      <div class="pointer" aria-hidden="true"></div>
+      
+      <svg id="wheel" viewBox="0 0 440 440" role="img" aria-label="Twelve-prize spinning wheel">
+        <defs>
+       
+          <filter id="inset-shadow-green" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB">
+            <feFlood flood-color="rgba(101, 242, 131, 0.5)" result="shadow-color" />
+            <feComposite in="shadow-color" in2="SourceAlpha" operator="in" result="colored" />
+            <feGaussianBlur in="SourceAlpha" stdDeviation="12" result="blur" />
+            <feOffset in="blur" dx="2" dy="1" result="offset-blur" />
+            <feComposite in="SourceAlpha" in2="offset-blur" operator="out" result="inner-edge" />
+            <feComposite in="colored" in2="inner-edge" operator="in" result="inner-shadow" />
+            <feMerge>
+              <feMergeNode in="SourceGraphic" />
+              <feMergeNode in="inner-shadow" />
+            </feMerge>
+          </filter>
+          <filter id="inset-shadow-winner" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB">
+            <feFlood flood-color="#ffa1a1" result="shadow-color" />
+            <feComposite in="shadow-color" in2="SourceAlpha" operator="in" result="colored" />
+            <feGaussianBlur in="SourceAlpha" stdDeviation="12" result="blur" />
+            <feOffset in="blur" dx="2" dy="1" result="offset-blur" />
+            <feComposite in="SourceAlpha" in2="offset-blur" operator="out" result="inner-edge" />
+            <feComposite in="colored" in2="inner-edge" operator="in" result="inner-shadow" />
+            <feMerge><feMergeNode in="SourceGraphic" /><feMergeNode in="inner-shadow" /></feMerge>
+          </filter>
+          <filter id="inset-shadow-blue" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB">
+            <feFlood flood-color="#5eaaff80" result="shadow-color" />
+            <feComposite in="shadow-color" in2="SourceAlpha" operator="in" result="colored" />
+            <feGaussianBlur in="SourceAlpha" stdDeviation="12" result="blur" />
+            <feOffset in="blur" dx="2" dy="1" result="offset-blur" />
+            <feComposite in="SourceAlpha" in2="offset-blur" operator="out" result="inner-edge" />
+            <feComposite in="colored" in2="inner-edge" operator="in" result="inner-shadow" />
+            <feMerge>
+              <feMergeNode in="SourceGraphic" />
+              <feMergeNode in="inner-shadow" />
+            </feMerge>
+          </filter>
+        </defs>
+        <g id="wheel-segments"></g>
+      </svg>
+    </div>
+
+    <div id="result" role="status" aria-live="polite"></div>
+    <p id="connection-status" hidden>Connecting...</p>
+    <p id="queue-status" hidden>Waiting for visitors...</p>
+    <div id="status" hidden>Waiting for a visitor...</div>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+
+    const wheel = document.getElementById('wheel');
+    const wheelSegments = document.getElementById('wheel-segments');
+    const result = document.getElementById('result');
+    const status = document.getElementById('status');
+    const connectionStatus = document.getElementById('connection-status');
+    let rotation = 20;
+    let activeSpinId = null;
+    let activePrizeId = null;
+    const socket = io();
+ 
+    const soundButton = document.getElementById('enable-sound');
+    let audioContext = null;
+    let tickBuffer = null;
+    let jackpotBuffer = null;
+    let tickFrame = null;
+    let lastWheelAngle = null;
+    let wheelTravel = 0;
+    let nextBoundary = null;
+    const sliceAngle = 360 / 12;
+
+    soundButton.addEventListener('click', async () => {
+      try {
+        audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
+        await audioContext.resume();
+        const response = await fetch('/spin-tick.mp3');
+        if (!response.ok) throw new Error('Audio file unavailable');
+        tickBuffer = await audioContext.decodeAudioData(await response.arrayBuffer());
+   
+        const winResponse = await fetch('/jackpot-win.wav');
+        if (!winResponse.ok) throw new Error('Jackpot audio file unavailable');
+        jackpotBuffer = await audioContext.decodeAudioData(await winResponse.arrayBuffer());
+        soundButton.textContent = 'Sound enabled';
+        soundButton.disabled = true;
+      } catch (error) {
+        console.error('Could not enable wheel sound:', error);
+        soundButton.textContent = 'Retry enabling sound';
+      }
+    });
+
+    function playTick() {
+      if (!audioContext || !tickBuffer || audioContext.state !== 'running') return;
+      const source = audioContext.createBufferSource();
+      const volume = audioContext.createGain();
+      source.buffer = tickBuffer;
+      source.connect(volume);
+      volume.connect(audioContext.destination);
+      const now = audioContext.currentTime;
+      volume.gain.setValueAtTime(0.75, now);
+
+      volume.gain.setValueAtTime(0.75, now + 0.035);
+      volume.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
+      source.start(now);
+      source.stop(now + Math.min(0.14, tickBuffer.duration));
+    }
+
+    function playJackpotSound() {
+      if (!audioContext || !jackpotBuffer || audioContext.state !== 'running') return;
+      const source = audioContext.createBufferSource();
+      const gain = audioContext.createGain();
+      source.buffer = jackpotBuffer;
+      gain.gain.value = 0.8;
+      source.connect(gain);
+      gain.connect(audioContext.destination);
+      source.start();
+    }
+
+    function getWheelAngle() {
+      const transform = getComputedStyle(wheel).transform;
+      if (!transform || transform === 'none') return 0;
+      const matrix = new DOMMatrixReadOnly(transform);
+      return ((Math.atan2(matrix.b, matrix.a) * 180 / Math.PI) % 360 + 360) % 360;
+    }
+
+    function followWheelSound() {
+      const angle = getWheelAngle();
+      if (lastWheelAngle !== null) {
+        let delta = (angle - lastWheelAngle + 360) % 360;
+    
+        if (delta > 350) delta = 0;
+        wheelTravel += delta;
+        while (nextBoundary !== null && wheelTravel >= nextBoundary) {
+          playTick();
+          nextBoundary += sliceAngle;
+        }
+      }
+      lastWheelAngle = angle;
+      tickFrame = requestAnimationFrame(followWheelSound);
+    }
+
+    function startWheelSound() {
+      if (tickFrame !== null) cancelAnimationFrame(tickFrame);
+      lastWheelAngle = getWheelAngle();
+      wheelTravel = 0;
+     
+      nextBoundary = (sliceAngle - (lastWheelAngle % sliceAngle)) % sliceAngle;
+      if (nextBoundary < 0.01) nextBoundary = sliceAngle;
+      tickFrame = requestAnimationFrame(followWheelSound);
+    }
+
+    function stopWheelSound() {
+      if (tickFrame !== null) cancelAnimationFrame(tickFrame);
+      tickFrame = null;
+      lastWheelAngle = null;
+      nextBoundary = null;
+    }
+
+
+
+    const wheelLabels = [["Random", "gossip"], ["Free", "spin"], ["Murmurs", "and Whispers"], ["Oops"], ["Talking", "heads"], ["Oh no"], ["Jackpot"], ["Gossip", "lore"], ["Random", "gossip"], ["???"], ["Get your", "money back"], ["Sacrificial", "lamb"]];
+
+
+    const prizes = [
+      {
+            "id": "gossip"
+      },
+      {
+            "id": "free"
+      },
+      {
+            "id": "balloon"
+      },
+      {
+            "id": "judgement"
+      },
+      {
+            "id": "notification"
+      },
+      {
+            "id": "ohno"
+      },
+      {
+            "id": "jackpot"
+      },
+      {
+            "id": "lore"
+      },
+      {
+            "id": "gossip2"
+      },
+      {
+            "id": "questions"
+      },
+      {
+            "id": "refund"
+      },
+      {
+            "id": "sacrifice"
+      }
+];
+
+    const segmentAngle = 360 / prizes.length;
+
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const center = 220;
+    const radius = 208;
+
+    function pointOnCircle(angle, distance) {
+      const radians = angle * Math.PI / 180;
+      return {
+        x: center + Math.cos(radians) * distance,
+        y: center + Math.sin(radians) * distance
+      };
+    }
+
+    const segmentPaths = [];
+    const originalFilters = [];
+    prizes.forEach((prize, index) => {
+      const startAngle = -90 + index * segmentAngle;
+      const endAngle = startAngle + segmentAngle;
+      const start = pointOnCircle(startAngle, radius);
+      const end = pointOnCircle(endAngle, radius);
+
+      const path = document.createElementNS(svgNS, 'path');
+      path.setAttribute('d', `M ${center} ${center} L ${start.x} ${start.y} A ${radius} ${radius} 0 0 1 ${end.x} ${end.y} Z`);
+      path.setAttribute('class', 'segment-shape');
+      path.setAttribute('filter', index % 2 === 0
+        ? 'url(#inset-shadow-green)'
+        : 'url(#inset-shadow-blue)');
+      wheelSegments.appendChild(path);
+      segmentPaths.push(path);
+      originalFilters.push(path.getAttribute('filter'));
+
+      const labelPosition = pointOnCircle(startAngle + segmentAngle / 2, radius * 0.64);
+      const label = document.createElementNS(svgNS, 'text');
+      label.setAttribute('class', 'segment-label');
+      label.setAttribute('x', labelPosition.x);
+      label.setAttribute('y', labelPosition.y);
+
+      wheelLabels[index].forEach((line, lineIndex, lines) => {
+        const tspan = document.createElementNS(svgNS, 'tspan');
+        tspan.setAttribute('x', labelPosition.x);
+        tspan.setAttribute('dy', lineIndex === 0 ? `${-(lines.length - 1) * 7}px` : '14px');
+        tspan.textContent = line;
+        label.appendChild(tspan);
+      });
+      wheelSegments.appendChild(label);
+
+   
+      const illustrationFile = prizeIllustrations[prize.id];
+      if (illustrationFile) {
+        const imagePosition = pointOnCircle(
+          startAngle + segmentAngle / 2,
+          radius * 0.36
+        );
+        const imageSize = 42;
+        const illustration = document.createElementNS(svgNS, 'image');
+        illustration.setAttribute('href', illustrationFile);
+        illustration.setAttribute('x', imagePosition.x - imageSize / 2);
+        illustration.setAttribute('y', imagePosition.y - imageSize / 2);
+        illustration.setAttribute('width', imageSize);
+        illustration.setAttribute('height', imageSize);
+        illustration.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        illustration.setAttribute('pointer-events', 'none');
+        wheelSegments.appendChild(illustration);
+      }
+    });
+
+
+    socket.on('connect', () => {
+      connectionStatus.textContent = 'Connected to server.';
+      socket.emit('register-kiosk');
+    });
+
+    socket.on('kiosk-ready', () => {
+      connectionStatus.textContent = 'Wheel ready.';
+    });
+
+    socket.on('queue-status', ({ waiting, busy }) => {
+      document.getElementById('queue-status').textContent =
+        `Waiting: ${waiting} visitor(s)`;
+      if (!busy && !activeSpinId) status.textContent = 'Waiting for a visitor...';
+    });
+
+    socket.on('visitor-connected', () => {
+      status.textContent = 'Visitor is ready to spin.';
+    });
+
+    socket.on('visitor-disconnected', () => {
+      if (!activeSpinId) status.textContent = 'Ready for next visitor.';
+    });
+
+    function textRain(container, word) {
+      container.replaceChildren();
+      for (let i = 0; i < 260; i++) {
+        const el = document.createElement('span');
+        el.className = 'rain-word';
+        el.textContent = word[Math.floor(Math.random() * word.length)];
+        el.style.left = (Math.random() * 100) + '%';
+        el.style.top = (-Math.random() * 120) + 'px';
+        el.style.animationDelay = (Math.random() * 5) + 's';
+        el.style.animationDuration = (16 + Math.random() * 5) + 's';
+        container.appendChild(el);
+      }
+      setTimeout(() => container.replaceChildren(), 33000);
+    }
+
+    socket.on('spin-started', ({ id, prizeId }) => {
+      activeSpinId = id;
+      activePrizeId = prizeId;
+      result.textContent = '';
+      document.body.classList.remove('jackpot-reveal');
+      segmentPaths.forEach((path, index) => {
+        path.classList.remove('winning-segment');
+        path.setAttribute('filter', originalFilters[index]);
+      });
+      const rainLayer = document.getElementById('rain');
+      rainLayer.replaceChildren();
+      status.textContent = 'Spinning...';
+      const winningIndex = prizeIds.indexOf(prizeId);
+      if (winningIndex < 0) return;
+
+      startWheelSound();
+
+      const targetAngle = (360 - (winningIndex * segmentAngle + segmentAngle / 2)) % 360;
+      const currentAngle = ((rotation % 360) + 360) % 360;
+      rotation += 360 * 6 + (targetAngle - currentAngle + 360) % 360;
+   
+      requestAnimationFrame(() => {
+        wheel.style.transform = `rotate(${rotation}deg)`;
+      });
+    });
+
+    socket.on('spin-finished', ({ id, label }) => {
+      if (id !== activeSpinId) return;
+      stopWheelSound();
+      const won = prizeIds.indexOf(activePrizeId);
+      if (won >= 0) {
+        segmentPaths[won].classList.add('winning-segment');
+        segmentPaths[won].setAttribute('filter', 'url(#inset-shadow-winner)');
+      }
+      if (activePrizeId === 'jackpot') {
+        playJackpotSound();
+  
+        document.body.classList.remove('jackpot-reveal');
+        void document.body.offsetWidth;
+        document.body.classList.add('jackpot-reveal');
+        setTimeout(() => document.body.classList.remove('jackpot-reveal'), 21600);
+      }
+      if (activePrizeId === 'balloon') {
+        setTimeout(() => textRain(document.getElementById('rain'), 'bshbsh'), 350);
+      }
+      status.textContent = 'Result delivered to the phone.';
+      result.textContent = activePrizeId === 'balloon' ? '' : label;
+      activeSpinId = null;
+    });
+
+    socket.on('connect_error', () => {
+      connectionStatus.textContent = 'Cannot connect to server.';
+    });
+    const prizeIds = ["gossip", "free", "balloon", "judgement", "notification", "ohno", "jackpot", "lore", "gossip2", "questions", "refund", "sacrifice"];
+  </script>
+</body>
+</html>

@@ -1,0 +1,155 @@
+
+body.kiosk {
+  margin: 0;
+  padding: 1.5rem;
+  box-sizing: border-box;
+  min-height: 100vh;
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #111;
+  background: white;
+  box-shadow: inset 2px 1px 20px 4px rgba(242, 139, 139, 0.5);
+}
+body.kiosk main { width: 100%; max-width: none; text-align: center; }
+body.kiosk h1 { font-size: 24px; font-weight: normal; margin: 0 0 12px; }
+body.kiosk p { margin: 0 0 16px; }
+body.kiosk .wheel-container {
+  position: relative;
+  width: min(600px, 85vw, 72vh);
+  margin: 0 auto 20px;
+}
+body.kiosk #wheel {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+  transform-origin: 50% 50%;
+  transform-box: view-box;
+  transform: rotate(20deg);
+  transition: transform 5s cubic-bezier(0.12, 0.72, 0.12, 1);
+}
+body.kiosk .segment-shape { fill: white; stroke-width: 0.8; }
+body.kiosk .segment-label {
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 12px;
+  fill: #111;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+body.kiosk .pointer {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-top: 22px solid #ffa1a1;
+  z-index: 1;
+}
+body.kiosk button:disabled { opacity: 0.45; cursor: default; }
+body.kiosk #result { margin-top: 20px; min-height: 24px; }
+body.kiosk #status { margin-top: 8px; font-size: 14px; }
+
+body.kiosk #rain { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 5; }
+body.kiosk .rain-word { position: absolute; font: 15px 'Times New Roman', serif; animation: fall 15s linear forwards; }
+@keyframes fall { 0% { transform: translateY(-40px); opacity: 0; } 8% { opacity: 1; } 75% { opacity: 1; } 100% { transform: translateY(115vh); opacity: 0; } }
+
+/* Phone controller */
+body.controller {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      height: 100vh;
+      font-family: 'Times New Roman', Times, serif;
+      font-size: 16px;
+      line-height: 1.5;
+      color: #111;
+      background: white;
+      box-shadow: inset 2px 1px 20px 4px rgba(242, 139, 139, 0.5);
+      width: 100%;
+    }body.controller main { 
+        width: 100%; 
+        height: 100vh;
+    }body.controller h1 { font-size: 2em; font-weight: normal; }body.controller button, body.controller textarea { font: inherit; font-size: 1.2em;}body.controller textarea { width: 100%; min-height: 130px; box-sizing: border-box; }body.controller #result { 
+        white-space: pre-wrap;
+    padding: 1em;
+    font-size: 1.1em;
+    font-style: italic;
+    box-shadow: inset #c9e4f7 -1px 0px 14px 11px;
+}body.controller button:disabled { opacity: 0.45; }body.controller .welcome {text-align: center;
+    padding: 1.2em;
+
+    box-shadow: inset #ddf7d1 -1px 0px 14px 11px;}body.controller .buttonarea {
+       
+
+        padding: 1.3em;
+        text-align: center;
+        box-shadow: inset #ddf7d1 -1px 0px 14px 11px;
+    }body.controller .marquee {
+        padding: 0.7em;
+         box-shadow: inset rgba(244, 182, 182, 0.5) -1px 0px 14px 11px;
+    }body.controller .marquee-bottom {
+        position: absolute;
+        bottom: 0;
+    }body.controller #submission {
+         padding: 1.2em;
+         box-shadow: inset #ddf7d1 -1px 0px 14px 11px;
+    }
+
+
+[hidden] { display: none !important; }
+body.controller { min-height: 100vh; height: auto; }
+body.controller main { min-height: 100vh; height: auto; padding-bottom: 3.5em; box-sizing: border-box; }
+body.controller .marquee-bottom { position: fixed; bottom: 0; left: 0; right: 0; background: white; }
+body.controller #jackpot-actions { padding: 1.2em; box-shadow: inset #ddf7d1 -1px 0px 14px 11px; }
+body.controller #jackpot-actions button { display: block; margin: 10px 0; }
+body.controller #jackpot-secret { white-space: pre-wrap; }
+body.controller #rain { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 10; }
+body.controller .rain-word { position: absolute; font: 15px 'Times New Roman', serif; white-space: nowrap; animation: fall 15s linear forwards; }
+
+/* SVG inner shadow on the winning wedge; preserve white fill. */
+body.kiosk .segment-shape.winning-segment { fill: white; filter: url(#inset-shadow-winner); }
+
+/* Prize title is upright; the message remains italic. */
+body.controller #result h3 { font-style: normal; font-weight: normal; margin: 0 0 0.7em; font-size: 1.25em; }
+body.controller #result .prize-message { font-style: italic; white-space: pre-wrap; }
+
+/* Jackpot headline: 2px larger than the other result headings. */
+body.controller #result h3.jackpot { font-size: calc(1.25em + 12px); }
+
+/* Setup-only sound unlock: disappears after being enabled. */
+body.kiosk #enable-sound { position: fixed; right: 16px; bottom: 16px; z-index: 20; font: 14px 'Times New Roman', serif; background: white; border: 1px solid #ffa1a1; padding: 8px 12px; cursor: pointer; }
+body.kiosk #enable-sound:disabled { display: none; }
+
+/* Jackpot reveal: only the winning visitor's phone changes color. */
+body.controller {
+  transition: background-color 1.4s ease, box-shadow 1.4s ease;
+}
+body.controller.jackpot-won {
+  background-color: #ffe0e0;
+  box-shadow: inset 2px 1px 28px 8px rgba(255, 161, 161, 0.65);
+}
+body.controller.jackpot-won #result {
+  animation: jackpot-glow 2.4s ease-in-out 9;
+}
+@keyframes jackpot-glow {
+  0%, 100% { box-shadow: inset #c9e4f7 -1px 0px 14px 11px; }
+  50% { box-shadow: inset #ffa1a1 -1px 0px 24px 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body.controller, body.controller.jackpot-won #result { transition: none; animation: none; }
+}
+
+body.kiosk.jackpot-reveal {
+  animation: kiosk-jackpot-pulse 2.4s ease-in-out 9;
+}
+@keyframes kiosk-jackpot-pulse {
+  0%, 100% { box-shadow: inset 2px 1px 20px 4px rgba(242, 139, 139, 0.5); }
+  50% { box-shadow: inset 2px 1px 75px 22px rgba(255, 115, 135, 0.95); }
+}
+@media (prefers-reduced-motion: reduce) {
+  body.kiosk.jackpot-reveal { animation: none; }
+}

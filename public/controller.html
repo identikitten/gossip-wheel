@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Spin the Gossip Wheel — Controller</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="controller">
+<main>
+   <div class="marquee"><marquee>𓂈  𓂐  𓂏  𓂊  𓂨  𓁹  𓂈  𓂐  𓂏  𓂊  𓂨  𓁹  𓂈  𓂐  𓂏  𓂊  𓂨  𓁹 𓂈  𓂐  𓂏  𓂊  𓂨  𓁹  𓂈  𓂐  𓂏  𓂊  𓂨  𓁹  𓂈  𓂐  𓂏  𓂊  𓂨  𓁹</marquee></div>
+  <div class="welcome"><h1>Welcome to Spin the Gossip Wheel!</h1>
+  <p id="connection" style="display:none;">Connecting...</p>
+  <p id="queue"></p>
+
+  </div>
+ 
+  <div id="result" role="status" aria-live="polite" hidden></div>
+  <section id="jackpot-actions" hidden>
+    <div id="jackpot-secret"></div>
+    <button type="button" data-choice="release">Bring it back to the pool</button>
+    <button type="button" data-choice="keep">Keep it for myself</button>
+    <p id="jackpot-status"></p>
+  </section>
+  <div id="rain" hidden aria-hidden="true"></div>
+   <form id="submission" hidden>
+    <label for="gossip" id="submission-prompt"></label>
+    <textarea id="gossip" maxlength="2000" required></textarea>
+    <p><button type="submit">Submit gossip</button></p>
+    <p id="submission-status"></p>
+  </form>
+  
+ <div class="buttonarea"> <button id="spin" disabled hidden>Spin</button><p id="credits"></p>
+  <button id="test-again" type="button" hidden>Test another spin</button></div>
+  
+ 
+ 
+  <div class="marquee marquee-bottom"><marquee>𓂈  𓂐  𓂏  𓂊  𓂨  𓁹  𓂈  𓂐  𓂏  𓂊  𓂨  𓁹  𓂈  𓂐  𓂏  𓂊  𓂨  𓁹 𓂈  𓂐  𓂏  𓂊  𓂨  𓁹  𓂈  𓂐  𓂏  𓂊  𓂨  𓁹  𓂈  𓂐  𓂏  𓂊  𓂨  𓁹</marquee></div>
+</main>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+
+  const STORAGE_KEY = 'gossip-roulette-visitor-token';
+  const socket = io();
+  const connection = document.getElementById('connection');
+  const queue = document.getElementById('queue');
+  const spinButton = document.getElementById('spin');
+  const credits = document.getElementById('credits');
+  const testAgain = document.getElementById('test-again');
+  const result = document.getElementById('result');
+  const submission = document.getElementById('submission');
+  const submissionStatus = document.getElementById('submission-status');
+  const gossipInput = document.getElementById('gossip');
+  let currentState = null;
+  const jackpotActions = document.getElementById('jackpot-actions');
+  const jackpotSecret = document.getElementById('jackpot-secret');
+  const jackpotStatus = document.getElementById('jackpot-status');
+  const submissionPrompt = document.getElementById('submission-prompt');
+  const rain = document.getElementById('rain');
+  const prizeLabels = {
+    gossip: 'Random gossip', gossip2: 'Random gossip', free: 'Free spin', balloon: 'Murmurs and Whispers',
+    judgement: 'Oops', ohno: 'Oh no', notification: 'Talking heads',
+    jackpot: 'Jackpot', lore: 'Gossip lore', questions: '???',
+    refund: 'Get your money back', sacrifice: 'Sacrificial lamb'
+  };
+  const submissionPrompts = {
+    sacrifice: 'Leave your offering of gossip here:',
+    notification: 'Your turn to feed the belly of the beast! Please leave a piece of gossip here (what have you heard lately at work, school, your neighborhood? Who’s doing what to whom? Or who’s doing what to you?)',
+    questions: 'Leave your answer here:'
+  };
+  let selectedKind = null;
+ 
+  function showResult(prize) {
+    if (!prize) return;
+    result.replaceChildren();
+    const title = document.createElement('h3');
+    title.textContent = prize.label || prize.prizeId || 'Prize';
+    if (prize.prizeId === 'jackpot') title.hidden = true;
+    const message = document.createElement('div');
+    message.className = 'prize-message';
+
+    const raw = prize.message || '';
+    if (prize.prizeId === 'jackpot') {
+      const [headline, ...body] = raw.split('\n');
+      const jackpotHeading = document.createElement('h3');
+      jackpotHeading.className = 'jackpot';
+      jackpotHeading.textContent = headline;
+      message.append(jackpotHeading, document.createTextNode(body.join('\n')));
+    } else if (prize.prizeId === 'refund') {
+      const [intro, ...ending] = raw.split('\n');
+      message.append(document.createTextNode(intro + '\n'));
+      const emphasis = document.createElement('strong');
+      emphasis.textContent = ending.join('\n');
+      message.append(emphasis);
+    } else {
+      message.textContent = raw;
+    }
+    result.append(title, message);
+    document.body.classList.toggle('jackpot-won', prize.prizeId === 'jackpot');
+    result.hidden = false;
+  }
+
+  function textRain() {
+    rain.hidden = false;
+    rain.replaceChildren();
+    for (let i = 0; i < 220; i++) {
+      const el = document.createElement('span');
+      el.className = 'rain-word';
+      el.textContent = 'bshbsh'[Math.floor(Math.random() * 6)];
+      el.style.left = (Math.random() * 85) + '%';
+      el.style.top = (-Math.random() * 120) + 'px';
+      el.style.animationDelay = (Math.random() * 5) + 's';
+      el.style.animationDuration = (16 + Math.random() * 5) + 's';
+      rain.appendChild(el);
+    }
+    setTimeout(() => { rain.replaceChildren(); rain.hidden = true; }, 27000);
+  }
+  function showExtras(state) {
+    const kinds = state.pendingKinds || [];
+    selectedKind = kinds[0] || null;
+    submission.hidden = !selectedKind;
+    if (selectedKind) {
+      submissionPrompt.textContent = selectedKind === 'questions' ? submissionPrompts[selectedKind] : selectedKind === 'sacrifice' ? 'Leave your offering of gossip here:' : 'Leave your gossip here:';
+      gossipInput.disabled = false;
+      submission.querySelector('button').disabled = false;
+      submissionStatus.textContent = selectedKind === 'questions' ? '' : selectedKind === 'sacrifice' ? 'This gossip will now circulate in the wheel’s gossip pool. Submissions are reviewed before being added to the wheel.' : 'Gossip submissions are reviewed before being added to the wheel.';
+    }
+    jackpotActions.hidden = !state.jackpot;
+    if (state.jackpot) {
+      jackpotSecret.replaceChildren();
+      const items = state.jackpot.items || [];
+      if (!items.length) jackpotSecret.textContent = 'No gossip was submitted yesterday.';
+      items.forEach((item, i) => {
+        const paragraph = document.createElement('p');
+        paragraph.textContent = `${i + 1}. ${item.text}`;
+        jackpotSecret.appendChild(paragraph);
+      });
+      jackpotStatus.textContent = state.jackpot.choice ?
+        (state.jackpot.choice === 'release' ? 'You catched some gossip and have chosen to release it back into the pool. You’re like a gossip gardener!' : 'You kept yesterday’s gossip to yourself. Now you’re the only one here who will know.') : '';
+      jackpotActions.querySelectorAll('button').forEach(button => button.disabled = !!state.jackpot.choice);
+    }
+
+  }
+
+  function render(state) {
+    currentState = state;
+    const waiting = state.phase === 'waiting';
+    const active = state.phase === 'active';
+    const spinning = state.phase === 'spinning';
+    const finished = state.phase === 'finished';
+    if (!state.result && (waiting || active || spinning)) document.body.classList.remove('jackpot-won');
+
+    queue.textContent = waiting ? `Your position in the queue: ${state.position}` :
+      active ? 'Your turn!' : spinning ? 'The wheel is spinning...' :
+      'Thank you for playing Spin the Gossip Wheel';
+    spinButton.hidden = !active;
+    spinButton.disabled = !active || state.credits < 1;
+    credits.textContent = active ? `Spins remaining: ${state.credits}` : '';
+
+    
+    if (state.result) {
+      showResult(state.result);
+    }
+    if (state.notice) connection.textContent = state.notice;
+
+    showExtras(state);
+    if (state.submitted) submissionStatus.textContent = 'Your gossip was submitted for review.';
+    if (finished) spinButton.hidden = true;
+    testAgain.hidden = !finished;
+  }
+
+  socket.on('connect', () => {
+    connection.textContent = 'Connected.';
+    socket.emit('join-queue', { token: localStorage.getItem(STORAGE_KEY) }, (reply) => {
+      if (!reply.ok) {
+        connection.textContent = reply.error;
+        return;
+      }
+      localStorage.setItem(STORAGE_KEY, reply.token);
+      render(reply.state);
+    });
+  });
+
+  socket.on('session-state', render);
+  socket.on('queue-update', ({ position }) => {
+    if (currentState && currentState.phase === 'waiting') {
+      render({ ...currentState, position });
+    }
+  });
+  socket.on('spin-started', () => {
+    document.body.classList.remove('jackpot-won');
+    spinButton.disabled = true;
+    queue.textContent = 'The wheel is spinning...';
+  });
+  socket.on('spin-finished', ({ message, prizeId, credits: remaining }) => {
+    showResult({ message, prizeId, label: prizeLabels[prizeId] });
+    
+    if (currentState) currentState.result = { prizeId, message };
+    if (prizeId === 'balloon') setTimeout(textRain, 350);
+    if (prizeId === 'jackpot' && typeof navigator.vibrate === 'function') {
+   
+      navigator.vibrate([180, 90, 240, 90, 450]);
+    }
+  });
+  socket.on('disconnect', () => {
+    connection.textContent = 'Connection lost. Reconnecting...';
+    spinButton.disabled = true;
+  });
+  socket.on('session-replaced', () => {
+    connection.textContent = 'This session is open in another tab.';
+    spinButton.disabled = true;
+  });
+
+  spinButton.addEventListener('click', () => {
+    spinButton.disabled = true;
+    socket.emit('request-spin', {}, (reply) => {
+      if (!reply.ok) {
+        connection.textContent = reply.error;
+        spinButton.disabled = false;
+      }
+    });
+  });
+
+  testAgain.addEventListener('click', () => {
+    testAgain.disabled = true;
+    socket.emit('test-play-again', {}, (reply) => {
+      testAgain.disabled = false;
+      if (!reply.ok) connection.textContent = reply.error;
+    });
+  });
+
+  jackpotActions.querySelectorAll('button').forEach(button => {
+    button.addEventListener('click', () => {
+      socket.emit('jackpot-choice', { choice: button.dataset.choice }, reply => {
+        if (!reply.ok) jackpotStatus.textContent = reply.error;
+      });
+    });
+  });
+
+  submission.addEventListener('submit', (event) => {
+    event.preventDefault();
+    socket.emit('submit-gossip', { text: gossipInput.value.trim(), kind: selectedKind }, (reply) => {
+      submissionStatus.textContent = reply.ok
+        ? 'Your gossip was submitted for review.' : reply.error;
+      if (reply.ok) {
+        gossipInput.value = '';
+        gossipInput.disabled = true;
+        submission.querySelector('button').disabled = true;
+      }
+    });
+  });
+</script>
+</body>
+</html>

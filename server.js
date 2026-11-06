@@ -17,6 +17,13 @@ const TURN_TIMEOUT_MS = 45000; // A visitor must press Spin within 45 seconds.
 const RECONNECT_GRACE_MS = 20000; // Brief Wi-Fi interruptions do not lose a turn.
 // Set KIOSK_PASSWORD privately in Railway Variables. Never commit it to GitHub.
 const KIOSK_PASSWORD = process.env.KIOSK_PASSWORD || '';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+const TEST_PASSWORD = process.env.TEST_PASSWORD || '';
+function securePasswordMatch(value, expectedValue) {
+  if (!expectedValue || typeof value !== 'string') return false;
+  const a = Buffer.from(value, 'utf8'), b = Buffer.from(expectedValue, 'utf8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 function validKioskPassword(value) {
   if (!KIOSK_PASSWORD || typeof value !== 'string') return false;
   const received = Buffer.from(value, 'utf8');
@@ -97,6 +104,7 @@ const content = JSON.parse(fs.readFileSync(path.join(__dirname, 'content.json'),
 const dataDir = process.env.DATA_DIR || __dirname;
 fs.mkdirSync(dataDir, { recursive: true });
 const submissionFile = path.join(dataDir, 'submissions.jsonl');
+const moderationFile = path.join(dataDir, 'moderation.json');
 const answerFile = path.join(dataDir, 'answers.jsonl'); // ??? responses are not gossip
 
 // One physical wheel. Phone sessions are indexed by unguessable tokens.
@@ -131,7 +139,7 @@ function pickPrize() {
 function messageFor(prize, session) {
   switch (prize.id) {
     case 'gossip':
-    case 'gossip2': return randomItem([...content.gossipPool, ...releasedGossip], 'There is no approved gossip to share yet.');
+    case 'gossip2': return randomItem([...content.gossipPool, ...releasedGossip, ...approvedVisitorGossip()], 'There is no approved gossip to share yet.');
     case 'free': return 'You won another free spin.';
     case 'balloon': return 'Can you hear the faint rumors?';
     case 'judgement': return 'A friend overheard you gossiping about them. You’ve lost a little bit of their trust, sorry.';
@@ -151,6 +159,36 @@ const stateFile = path.join(dataDir, 'prize-state.json');
 let persistent = { releasedGossip: [], jackpotDecisions: {} };
 try { persistent = { ...persistent, ...JSON.parse(fs.readFileSync(stateFile, 'utf8')) }; } catch (_) {}
 const releasedGossip = persistent.releasedGossip;
+let moderation = {};
+try { moderation = JSON.parse(fs.readFileSync(moderationFile, 'utf8')); } catch (_) {}
+function saveModeration() {
+  const temp = moderationFile + '.tmp';
+  fs.writeFileSync(temp, JSON.stringify(moderation, null, 2), { mode: 0o600 });
+  fs.renameSync(temp, moderationFile);
+}
+function submissions() {
+  if (!fs.existsSync(submissionFile)) return [];
+  return fs.readFileSync(submissionFile, 'utf8').split('\n').filter(Boolean)
+    .flatMap(line => { try { return [JSON.parse(line)]; } catch (_) { return []; } });
+}
+function decisionFor(entry) { return moderation[entry.id] || (entry.approved ? 'approved' : 'pending'); }
+function keptJackpotIds() {
+  const ids = new Set();
+  for (const decision of Object.values(persistent.jackpotDecisions || {})) {
+    if (decision.status === 'keep') for (const item of decision.items || []) ids.add(item.id);
+  }
+  return ids;
+}
+function approvedVisitorGossip() {
+  const kept = keptJackpotIds();
+  return submissions().filter(entry =>
+    ['sacrifice','notification'].includes(entry.kind) &&
+    decisionFor(entry) === 'approved' && !kept.has(entry.id) &&
+    // Yesterday's Jackpot collection is withheld until its winner releases it.
+    !Object.values(persistent.jackpotDecisions || {}).some(d =>
+      d.status !== 'release' && (d.items || []).some(item => item.id === entry.id))
+  ).map(entry => entry.text);
+}
 function saveState() {
   const tmp = stateFile + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(persistent, null, 2));
@@ -210,7 +248,7 @@ function scheduleTurnTimeout(session) {
 }
 
 function activateNext() {
-  if (activeToken || currentSpin || !kioskSocket) return;
+  if (activeToken || currentSpin || testSpinInProgress || !kioskSocket) return;
   while (queue.length) {
     const token = queue.shift();
     const session = sessions.get(token);
@@ -237,7 +275,70 @@ function endTurn(session, notice = '') {
   activateNext();
 }
 
+let testSpinInProgress = false;
+function authorized(socket, role) { return socket.data.role === role; }
 io.on('connection', (socket) => {
+  socket.on('admin-login', ({ password } = {}, reply = () => {}) => {
+    if (!securePasswordMatch(password, ADMIN_PASSWORD)) return reply({ ok: false, error: 'Incorrect admin password.' });
+    if (socket.data.role && socket.data.role !== 'admin') return reply({ ok: false, error: 'Already registered as another role.' });
+    socket.data.role = 'admin';
+    reply({ ok: true });
+  });
+  socket.on('admin-list', (_payload = {}, reply = () => {}) => {
+    if (!authorized(socket, 'admin')) return reply({ ok: false, error: 'Unauthorized.' });
+    reply({ ok: true, submissions: submissions().map(entry => ({
+      id: entry.id, submittedAt: entry.submittedAt, kind: entry.kind,
+      text: entry.text, status: decisionFor(entry),
+      withheldByJackpot: keptJackpotIds().has(entry.id) ||
+        Object.values(persistent.jackpotDecisions || {}).some(d => d.status !== 'release' && (d.items || []).some(i => i.id === entry.id))
+    })).reverse(), answers: fs.existsSync(answerFile)
+      ? fs.readFileSync(answerFile,'utf8').split('\n').filter(Boolean).flatMap(line => { try { return [JSON.parse(line)]; } catch (_) { return []; } }).reverse()
+      : [] });
+  });
+  socket.on('admin-review', ({ id, status } = {}, reply = () => {}) => {
+    if (!authorized(socket, 'admin')) return reply({ ok: false, error: 'Unauthorized.' });
+    if (!['approved', 'rejected'].includes(status)) return reply({ ok: false, error: 'Invalid decision.' });
+    if (!submissions().some(entry => entry.id === id)) return reply({ ok: false, error: 'Submission not found.' });
+    try {
+      moderation[id] = status;
+      saveModeration();
+      reply({ ok: true });
+    } catch (error) {
+      console.error(error);
+      reply({ ok: false, error: 'Could not save moderation decision.' });
+    }
+  });
+  socket.on('test-login', ({ password } = {}, reply = () => {}) => {
+    if (!securePasswordMatch(password, TEST_PASSWORD)) return reply({ ok: false, error: 'Incorrect test password.' });
+    if (socket.data.role && socket.data.role !== 'tester') return reply({ ok: false, error: 'Already registered as another role.' });
+    socket.data.role = 'tester';
+    reply({ ok: true });
+  });
+  socket.on('test-spin', ({ prizeId } = {}, reply = () => {}) => {
+    if (!authorized(socket, 'tester')) return reply({ ok: false, error: 'Unauthorized.' });
+    const prize = prizes.find(p => p.id === prizeId);
+    if (!prize) return reply({ ok: false, error: 'Unknown prize.' });
+    if (!kioskSocket) return reply({ ok: false, error: 'Exhibition wheel is not connected.' });
+    if (currentSpin || testSpinInProgress || activeToken || queue.length)
+      return reply({ ok: false, error: 'Testing is disabled while visitors are waiting or playing.' });
+    testSpinInProgress = true;
+    const id = crypto.randomUUID();
+    reply({ ok: true });
+    io.to(kioskSocket).emit('spin-started', { id, prizeId: prize.id });
+    setTimeout(() => {
+      io.to(kioskSocket).emit('spin-finished', { id, label: prize.label });
+      socket.emit('test-result', { prizeId: prize.id, label: prize.label,
+        message: prize.id === 'jackpot'
+          ? 'JACKPOT! (simulation — no real gossip is revealed or saved)'
+          : ['notification','sacrifice','questions'].includes(prize.id)
+            ? 'Simulation only — no submission form or information is saved.'
+            : prize.id === 'gossip' || prize.id === 'gossip2'
+              ? 'Random gossip (simulation)'
+              : messageFor(prize, {}) });
+      testSpinInProgress = false;
+      activateNext();
+    }, SPIN_MS);
+  });
   socket.on('register-kiosk', ({ password } = {}, reply = () => {}) => {
     // Only the authorized exhibition computer may become the kiosk.
     if (!validKioskPassword(password)) {
@@ -311,7 +412,7 @@ io.on('connection', (socket) => {
     const session = sessions.get(socket.data.token);
     if (!session || session.socketId !== socket.id || session.phase !== 'active' || activeToken !== session.token)
       return reply({ ok: false, error: 'It is not your turn.' });
-    if (!kioskSocket || currentSpin || session.credits < 1)
+    if (!kioskSocket || currentSpin || testSpinInProgress || session.credits < 1)
       return reply({ ok: false, error: 'The wheel is not ready.' });
     clearTurnTimer();
     session.credits -= 1;

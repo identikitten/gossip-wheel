@@ -7,6 +7,17 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body class="kiosk">
+  <!-- Only organizers unlock this screen; visitors use /spin.html. -->
+  <div id="kiosk-gate" style="position:fixed;inset:0;z-index:10000;background:#fff;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;">
+    <form id="kiosk-login" style="font-family:'Times New Roman',serif;text-align:center;max-width:420px;width:100%;">
+      <h2>Spin the Gossip Wheel</h2>
+      <p>Exhibition screen access</p>
+      <label for="kiosk-password">Password</label>
+      <input id="kiosk-password" type="password" autocomplete="current-password" required style="display:block;width:100%;box-sizing:border-box;margin:12px 0;padding:12px;font:inherit;">
+      <button type="submit" style="font:inherit;padding:10px 20px;cursor:pointer;">Unlock wheel</button>
+      <p id="kiosk-login-error" role="alert" style="color:#9a2940;min-height:1.5em;"></p>
+    </form>
+  </div>
   <div id="rain" aria-hidden="true"></div>
   <main>
     <h1>Spin the Gossip Wheel</h1>
@@ -285,13 +296,48 @@
     });
 
 
+    // Keep the password in memory for automatic Socket.IO reconnection.
+    // Refreshing the page requires the organizer to enter it again.
+    const kioskGate = document.getElementById('kiosk-gate');
+    const kioskLogin = document.getElementById('kiosk-login');
+    const kioskPasswordInput = document.getElementById('kiosk-password');
+    const kioskLoginError = document.getElementById('kiosk-login-error');
+    let kioskPassword = null;
+
+    function registerKiosk() {
+      if (!socket.connected || !kioskPassword) return;
+      socket.emit('register-kiosk', { password: kioskPassword }, (response) => {
+        if (!response || !response.ok) {
+          kioskGate.hidden = false;
+          kioskGate.style.display = 'flex';
+          kioskLoginError.textContent = response?.error || 'Could not unlock the wheel.';
+          // Do not keep retrying a rejected password.
+          kioskPassword = null;
+        }
+      });
+    }
+
+    kioskLogin.addEventListener('submit', (event) => {
+      event.preventDefault();
+      kioskPassword = kioskPasswordInput.value;
+      kioskPasswordInput.value = '';
+      kioskLoginError.textContent = '';
+      if (!socket.connected) {
+        kioskLoginError.textContent = 'Connecting to server. Please try again.';
+        return;
+      }
+      registerKiosk();
+    });
+
     socket.on('connect', () => {
       connectionStatus.textContent = 'Connected to server.';
-      socket.emit('register-kiosk');
+      registerKiosk();
     });
 
     socket.on('kiosk-ready', () => {
       connectionStatus.textContent = 'Wheel ready.';
+      kioskGate.hidden = true;
+      kioskGate.style.display = 'none';
     });
 
     socket.on('queue-status', ({ waiting, busy }) => {

@@ -29,6 +29,7 @@
     <p><button type="submit">Submit gossip</button></p>
     <p id="submission-status"></p>
   </form>
+  <p id="submission-confirmation" role="status" aria-live="polite" hidden>Thank you, your answer has been submitted.</p>
   
  <div class="buttonarea"> <button id="spin" disabled hidden>Spin</button><p id="credits"></p>
   <button id="test-again" type="button" hidden style="display: none;">Test another spin</button></div>
@@ -50,6 +51,7 @@
   const result = document.getElementById('result');
   const submission = document.getElementById('submission');
   const submissionStatus = document.getElementById('submission-status');
+  const submissionConfirmation = document.getElementById('submission-confirmation');
   const gossipInput = document.getElementById('gossip');
   let currentState = null;
   const jackpotActions = document.getElementById('jackpot-actions');
@@ -164,7 +166,7 @@
     if (state.notice) connection.textContent = state.notice;
 
     showExtras(state);
-    if (state.submitted) submissionStatus.textContent = 'Your gossip was submitted for review.';
+    submissionConfirmation.hidden = !state.submitted;
     if (finished) spinButton.hidden = true;
     testAgain.hidden = !finished;
   }
@@ -190,6 +192,7 @@
   socket.on('spin-started', () => {
     document.body.classList.remove('jackpot-won');
     spinButton.disabled = true;
+    submissionConfirmation.hidden = true;
     queue.textContent = 'The wheel is spinning...';
   });
   socket.on('spin-finished', ({ message, prizeId, credits: remaining }) => {
@@ -240,9 +243,9 @@
   submission.addEventListener('submit', (event) => {
     event.preventDefault();
     socket.emit('submit-gossip', { text: gossipInput.value.trim(), kind: selectedKind }, (reply) => {
-      submissionStatus.textContent = reply.ok
-        ? 'Your gossip was submitted for review.' : reply.error;
+      submissionStatus.textContent = reply.ok ? '' : reply.error;
       if (reply.ok) {
+        submissionConfirmation.hidden = false;
         gossipInput.value = '';
         gossipInput.disabled = true;
         submission.querySelector('button').disabled = true;

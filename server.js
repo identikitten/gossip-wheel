@@ -15,6 +15,14 @@ app.use(express.static(path.join(__dirname, 'public')));
 const SPIN_MS = 5000;
 const TURN_TIMEOUT_MS = 45000; // A visitor must press Spin within 45 seconds.
 const RECONNECT_GRACE_MS = 20000; // Brief Wi-Fi interruptions do not lose a turn.
+// Set KIOSK_PASSWORD privately in Railway Variables. Never commit it to GitHub.
+const KIOSK_PASSWORD = process.env.KIOSK_PASSWORD || '';
+function validKioskPassword(value) {
+  if (!KIOSK_PASSWORD || typeof value !== 'string') return false;
+  const received = Buffer.from(value, 'utf8');
+  const expected = Buffer.from(KIOSK_PASSWORD, 'utf8');
+  return received.length === expected.length && crypto.timingSafeEqual(received, expected);
+}
 const prizes = [
   {
     "id": "gossip",
@@ -230,10 +238,21 @@ function endTurn(session, notice = '') {
 }
 
 io.on('connection', (socket) => {
-  socket.on('register-kiosk', () => {
-    // The exhibition screen has a permanent URL; no changing pairing codes.
+  socket.on('register-kiosk', ({ password } = {}, reply = () => {}) => {
+    // Only the authorized exhibition computer may become the kiosk.
+    if (!validKioskPassword(password)) {
+      return reply({ ok: false, error: 'Incorrect password or KIOSK_PASSWORD is not configured.' });
+    }
+    if (socket.data.role && socket.data.role !== 'kiosk') {
+      return reply({ ok: false, error: 'This connection is already a visitor.' });
+    }
+    // Never allow a second browser to displace a connected exhibition wheel.
+    if (kioskSocket && kioskSocket !== socket.id && io.sockets.sockets.has(kioskSocket)) {
+      return reply({ ok: false, error: 'The exhibition wheel is already connected.' });
+    }
     kioskSocket = socket.id;
     socket.data.role = 'kiosk';
+    reply({ ok: true });
     socket.emit('kiosk-ready');
     updateQueue();
     activateNext();

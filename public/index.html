@@ -229,7 +229,8 @@
         y: center + Math.sin(radians) * distance
       };
     }
-
+   const prizeIllustrations = {};
+   
     const segmentPaths = [];
     const originalFilters = [];
     prizes.forEach((prize, index) => {
@@ -263,7 +264,7 @@
       });
       wheelSegments.appendChild(label);
 
-   
+
       const illustrationFile = prizeIllustrations[prize.id];
       if (illustrationFile) {
         const imagePosition = pointOnCircle(

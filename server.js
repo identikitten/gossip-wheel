@@ -319,8 +319,8 @@ io.on('connection', (socket) => {
     const prize = prizes.find(p => p.id === prizeId);
     if (!prize) return reply({ ok: false, error: 'Unknown prize.' });
     if (!kioskSocket) return reply({ ok: false, error: 'Exhibition wheel is not connected.' });
-    if (currentSpin || testSpinInProgress || activeToken || queue.length)
-      return reply({ ok: false, error: 'Testing is disabled while visitors are waiting or playing.' });
+    if (currentSpin || testSpinInProgress)
+      return reply({ ok: false, error: 'A spin is already in progress. Try again in a moment.' });
     testSpinInProgress = true;
     const id = crypto.randomUUID();
     reply({ ok: true });

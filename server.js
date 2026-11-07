@@ -329,7 +329,7 @@ io.on('connection', (socket) => {
       io.to(kioskSocket).emit('spin-finished', { id, label: prize.label });
       socket.emit('test-result', { prizeId: prize.id, label: prize.label,
         message: prize.id === 'jackpot'
-          ? 'JACKPOT! (simulation — no real gossip is revealed or saved)'
+          ? messageFor(prize, {})
           : ['notification','sacrifice','questions'].includes(prize.id)
             ? 'Simulation only — no submission form or information is saved.'
             : prize.id === 'gossip' || prize.id === 'gossip2'

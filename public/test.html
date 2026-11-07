@@ -1,10 +1,170 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Wheel test controller</title><link rel="stylesheet" href="/style.css"><style>main{max-width:600px;margin:2rem auto;padding:1rem}input,button,select{font:inherit;padding:.65rem}button{cursor:pointer}#result{white-space:pre-wrap;margin-top:2rem}</style></head><body><main><h1>Wheel test controller</h1><p>Runs the actual exhibition wheel animation without saving submissions, answers, or Jackpot choices. Testing is blocked while visitors are waiting or playing.</p><form id="login"><label>Test password <input id="password" type="password" required></label><button>Unlock</button></form><section id="controls" hidden><label for="prize">Prize</label><select id="prize"></select><p><button id="spin">Test selected prize</button> <button id="next">Next prize</button></p><p id="status" role="status"></p><div id="result"></div></section></main><script src="/socket.io/socket.io.js"></script><script>
-const socket=io(), prizes=[['gossip','Random gossip'],['free','Free spin'],['balloon','Murmurs and Whispers'],['judgement','Oops'],['notification','Talking heads'],['ohno','Oh no'],['jackpot','Jackpot'],['lore','Gossip lore'],['gossip2','Random gossip (second segment)'],['questions','???'],['refund','Get your money back'],['sacrifice','Sacrificial lamb']];
-const select=document.getElementById('prize'),status=document.getElementById('status'),controls=document.getElementById('controls'),login=document.getElementById('login'),spin=document.getElementById('spin'),next=document.getElementById('next'),result=document.getElementById('result');
-for(const [id,label] of prizes){const o=document.createElement('option');o.value=id;o.textContent=label;select.append(o)}
-login.addEventListener('submit',e=>{e.preventDefault();socket.emit('test-login',{password:document.getElementById('password').value},r=>{if(!r.ok)return status.textContent=r.error;login.hidden=true;controls.hidden=false;document.getElementById('password').value=''})});
-function test(){spin.disabled=true;next.disabled=true;result.textContent='';status.textContent='Spinning…';socket.emit('test-spin',{prizeId:select.value},r=>{if(!r.ok){status.textContent=r.error;spin.disabled=false;next.disabled=false}})}
-spin.addEventListener('click',test);next.addEventListener('click',()=>{select.selectedIndex=(select.selectedIndex+1)%select.options.length;test()});
-socket.on('test-result',r=>{status.textContent='Simulation complete';result.textContent=r.label+'\n\n'+r.message;spin.disabled=false;next.disabled=false});
-socket.on('disconnect',()=>{login.hidden=false;controls.hidden=true;status.textContent='Disconnected. Log in again.'});
-</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Controller Test</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="controller">
+<main>
+   <div class="marquee"><marquee>𓂈  𓂐  𓂏  𓂊  𓂨  𓁹  𓂈  𓂐  𓂏  𓂊  𓂨  𓁹  𓂈  𓂐  𓂏  𓂊  𓂨  𓁹 𓂈  𓂐  𓂏  𓂊  𓂨  𓁹  𓂈  𓂐  𓂏  𓂊  𓂨  𓁹  𓂈  𓂐  𓂏  𓂊  𓂨  𓁹</marquee></div>
+  <div class="welcome"><h1>Controller Test</h1>
+  <p id="connection" style="display:none;">Connecting...</p>
+  <p id="queue"></p>
+
+  </div>
+ 
+  <div id="result" role="status" aria-live="polite" hidden></div>
+  <div id="rain" hidden aria-hidden="true"></div>
+  <div class="buttonarea">
+    <form id="test-login">
+      <label for="test-password">Test password</label>
+      <input id="test-password" type="password" autocomplete="current-password" required>
+      <button type="submit">Unlock test controller</button>
+    </form>
+    <div id="test-controls" hidden>
+      <label for="test-prize">Choose a prize:</label>
+      <select id="test-prize"></select>
+      <p><button id="test-spin" type="button">Spin</button>
+      <button id="test-next" type="button">Next prize</button></p>
+      <p id="test-status" role="status"></p>
+    </div>
+  </div>
+
+  <div class="marquee marquee-bottom"><marquee>𓂈  𓂐  𓂏  𓂊  𓂨  𓁹  𓂈  𓂐  𓂏  𓂊  𓂨  𓁹  𓂈  𓂐  𓂏  𓂊  𓂨  𓁹 𓂈  𓂐  𓂏  𓂊  𓂨  𓁹  𓂈  𓂐  𓂏  𓂊  𓂨  𓁹  𓂈  𓂐  𓂏  𓂊  𓂨  𓁹</marquee></div>
+</main>
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  // The test page uses the same controller styling and effects, but never joins
+  // the visitor queue or submits anything to the server.
+  const socket = io();
+  const result = document.getElementById('result');
+  const queue = document.getElementById('queue');
+  const rain = document.getElementById('rain');
+  const login = document.getElementById('test-login');
+  const controls = document.getElementById('test-controls');
+  const select = document.getElementById('test-prize');
+  const spinButton = document.getElementById('test-spin');
+  const nextButton = document.getElementById('test-next');
+  const status = document.getElementById('test-status');
+  const prizes = [
+    ['gossip','Random gossip'], ['free','Free spin'],
+    ['balloon','Murmurs and Whispers'], ['judgement','Oops'],
+    ['notification','Talking heads'], ['ohno','Oh no'],
+    ['jackpot','Jackpot'], ['lore','Gossip lore'],
+    ['gossip2','Random gossip (second segment)'], ['questions','???'],
+    ['refund','Get your money back'], ['sacrifice','Sacrificial lamb']
+  ];
+  prizes.forEach(([id,label]) => {
+    const option = document.createElement('option');
+    option.value = id;
+    option.textContent = label;
+    select.appendChild(option);
+  });
+
+  // Reuse the actual visitor controller's result presentation.
+  function showResult(prize) {
+    if (!prize) return;
+    result.replaceChildren();
+    const title = document.createElement('h3');
+    title.textContent = prize.label || prize.prizeId || 'Prize';
+    if (prize.prizeId === 'jackpot') title.hidden = true;
+    const message = document.createElement('div');
+    message.className = 'prize-message';
+
+    const raw = prize.message || '';
+    if (prize.prizeId === 'jackpot') {
+      const [headline, ...body] = raw.split('\n');
+      const jackpotHeading = document.createElement('h3');
+      jackpotHeading.className = 'jackpot';
+      jackpotHeading.textContent = headline;
+      message.append(jackpotHeading, document.createTextNode(body.join('\n')));
+    } else if (prize.prizeId === 'refund') {
+      const [intro, ...ending] = raw.split('\n');
+      message.append(document.createTextNode(intro + '\n'));
+      const emphasis = document.createElement('strong');
+      emphasis.textContent = ending.join('\n');
+      message.append(emphasis);
+    } else {
+      message.textContent = raw;
+    }
+    result.append(title, message);
+    document.body.classList.toggle('jackpot-won', prize.prizeId === 'jackpot');
+    result.hidden = false;
+  }
+
+  // Reuse the same falling-character effect and timing as the real controller.
+  function textRain() {
+    rain.hidden = false;
+    rain.replaceChildren();
+    for (let i = 0; i < 220; i++) {
+      const el = document.createElement('span');
+      el.className = 'rain-word';
+      el.textContent = 'bshbsh'[Math.floor(Math.random() * 6)];
+      el.style.left = (Math.random() * 85) + '%';
+      el.style.top = (-Math.random() * 120) + 'px';
+      el.style.animationDelay = (Math.random() * 5) + 's';
+      el.style.animationDuration = (16 + Math.random() * 5) + 's';
+      rain.appendChild(el);
+    }
+    setTimeout(() => { rain.replaceChildren(); rain.hidden = true; }, 27000);
+  }
+
+  login.addEventListener('submit', event => {
+    event.preventDefault();
+    socket.emit('test-login', {password: document.getElementById('test-password').value}, reply => {
+      if (!reply.ok) { queue.textContent = reply.error; return; }
+      login.hidden = true;
+      controls.hidden = false;
+      document.getElementById('test-password').value = '';
+      queue.textContent = 'Ready to test the wheel.';
+    });
+  });
+
+  function setBusy(busy) {
+    spinButton.disabled = busy;
+    nextButton.disabled = busy;
+    select.disabled = busy;
+  }
+  function runTest() {
+    setBusy(true);
+    result.hidden = true;
+    result.replaceChildren();
+    document.body.classList.remove('jackpot-won');
+    rain.replaceChildren();
+    rain.hidden = true;
+    status.textContent = 'The wheel is spinning...';
+    queue.textContent = 'The wheel is spinning...';
+    socket.emit('test-spin', {prizeId: select.value}, reply => {
+      if (!reply.ok) {
+        status.textContent = reply.error;
+        queue.textContent = 'Ready to test the wheel.';
+        setBusy(false);
+      }
+    });
+  }
+  spinButton.addEventListener('click', runTest);
+  nextButton.addEventListener('click', () => {
+    select.selectedIndex = (select.selectedIndex + 1) % select.options.length;
+    runTest();
+  });
+  socket.on('test-result', ({prizeId,label,message}) => {
+    showResult({prizeId,label,message});
+    if (prizeId === 'balloon') setTimeout(textRain, 350);
+    if (prizeId === 'jackpot' && typeof navigator.vibrate === 'function') {
+      navigator.vibrate([180,90,240,90,450]);
+    }
+    status.textContent = 'Simulation complete — nothing was submitted or saved.';
+    queue.textContent = 'Thanks for playing <3';
+    setBusy(false);
+  });
+  socket.on('disconnect', () => {
+    login.hidden = false;
+    controls.hidden = true;
+    setBusy(false);
+    queue.textContent = 'Connection lost. Please reconnect and log in again.';
+  });
+</script>
+</body>
+</html>

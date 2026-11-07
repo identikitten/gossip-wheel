@@ -154,7 +154,7 @@
 
     queue.textContent = waiting ? `Your position in the queue: ${state.position}` :
       active ? 'Your turn!' : spinning ? 'The wheel is spinning...' :
-      'Thank you for playing Spin the Gossip Wheel';
+      'Thanks for playing!';
     spinButton.hidden = !active;
     spinButton.disabled = !active || state.credits < 1;
     credits.textContent = active ? `Spins remaining: ${state.credits}` : '';

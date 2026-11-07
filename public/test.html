@@ -155,8 +155,8 @@
     if (prizeId === 'jackpot' && typeof navigator.vibrate === 'function') {
       navigator.vibrate([180,90,240,90,450]);
     }
-    status.textContent = 'Simulation complete — nothing was submitted or saved.';
-    queue.textContent = 'Thanks for playing <3';
+    status.textContent = '';
+    queue.textContent = 'Thanks for playing!';
     setBusy(false);
   });
   socket.on('disconnect', () => {

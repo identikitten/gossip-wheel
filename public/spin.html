@@ -29,6 +29,13 @@
     <p><button type="submit">Submit gossip</button></p>
     <p id="submission-status"></p>
   </form>
+  <form id="replay" hidden>
+    <p>Want to spin again? Get another ticket from the docent!</p>
+    <label for="replay-code">Code:</label>
+    <input id="replay-code" type="password" required autocomplete="off">
+    <button type="submit">Unlock another spin</button>
+    <p id="replay-status" role="status" aria-live="polite"></p>
+  </form>
   <p id="submission-confirmation" role="status" aria-live="polite" hidden>Thank you, your answer has been submitted.</p>
   
  <div class="buttonarea"> <button id="spin" disabled hidden>Spin</button><p id="credits"></p>
@@ -50,6 +57,9 @@
   const testAgain = document.getElementById('test-again');
   const result = document.getElementById('result');
   const submission = document.getElementById('submission');
+  const replay = document.getElementById('replay');
+  const replayCode = document.getElementById('replay-code');
+  const replayStatus = document.getElementById('replay-status');
   const submissionStatus = document.getElementById('submission-status');
   const submissionConfirmation = document.getElementById('submission-confirmation');
   const gossipInput = document.getElementById('gossip');
@@ -154,7 +164,7 @@
 
     queue.textContent = waiting ? `Your position in the queue: ${state.position}` :
       active ? 'Your turn!' : spinning ? 'The wheel is spinning...' :
-      'Thanks for playing!';
+      'Thanks for playing <3';
     spinButton.hidden = !active;
     spinButton.disabled = !active || state.credits < 1;
     credits.textContent = active ? `Spins remaining: ${state.credits}` : '';
@@ -168,6 +178,13 @@
     showExtras(state);
     submissionConfirmation.hidden = !state.submitted;
     if (finished) spinButton.hidden = true;
+    replay.hidden = !finished || !!(state.pendingKinds && state.pendingKinds.length) ||
+      !!(state.jackpot && !state.jackpot.choice);
+    if (!finished) {
+      replayCode.value = '';
+      replayStatus.textContent = '';
+      if (!state.result) result.hidden = true;
+    }
     testAgain.hidden = !finished;
   }
 
@@ -237,6 +254,18 @@
       socket.emit('jackpot-choice', { choice: button.dataset.choice }, reply => {
         if (!reply.ok) jackpotStatus.textContent = reply.error;
       });
+    });
+  });
+
+  replay.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const button = replay.querySelector('button');
+    button.disabled = true;
+    replayStatus.textContent = '';
+    socket.emit('redeem-docent-code', { code: replayCode.value }, (reply) => {
+      replayCode.value = '';
+      button.disabled = false;
+      if (!reply.ok) replayStatus.textContent = reply.error || 'Could not unlock another spin.';
     });
   });
 

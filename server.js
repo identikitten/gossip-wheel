@@ -109,6 +109,7 @@ const dataDir = process.env.DATA_DIR || __dirname;
 fs.mkdirSync(dataDir, { recursive: true });
 const submissionFile = path.join(dataDir, 'submissions.jsonl');
 const moderationFile = path.join(dataDir, 'moderation.json');
+const firstJackpotFile = path.join(dataDir, 'first-jackpot.json');
 const answerFile = path.join(dataDir, 'answers.jsonl'); // ??? responses are not gossip
 
 // One physical wheel. Phone sessions are indexed by unguessable tokens.
@@ -125,19 +126,33 @@ function randomItem(items, fallback) {
     ? items[crypto.randomInt(items.length)] : fallback;
 }
 
+function firstJackpot() {
+  try {
+    const data = JSON.parse(fs.readFileSync(firstJackpotFile, 'utf8'));
+    return data && typeof data.text === 'string' && data.text.trim() && data.date === todayKey() ? data : null;
+  } catch (_) { return null; }
+}
+function specialJackpotAvailable() {
+  return !!firstJackpot() && !persistent.jackpotDecisions[todayKey()];
+}
 function pickPrize() {
   if (SEQUENTIAL_TEST) {
     const prize = prizes[nextTestPrize % prizes.length];
     nextTestPrize += 1;
     return prize;
   }
+  // Jackpot is available only with five approved submissions from yesterday,
+  // and cannot be awarded again on the same exhibition-local day.
+  const jackpotReady = (specialJackpotAvailable() || yesterdaysGossip().length >= 5) &&
+    !persistent.jackpotDecisions[todayKey()];
+  const eligiblePrizes = prizes.filter(prize => prize.id !== 'jackpot' || jackpotReady);
   let roll = crypto.randomInt(1000000000) / 1000000000 *
-    prizes.reduce((sum, prize) => sum + prize.weight, 0);
-  for (const prize of prizes) {
+    eligiblePrizes.reduce((sum, prize) => sum + prize.weight, 0);
+  for (const prize of eligiblePrizes) {
     roll -= prize.weight;
     if (roll < 0) return prize;
   }
-  return prizes[prizes.length - 1];
+  return eligiblePrizes[eligiblePrizes.length - 1];
 }
 
 function messageFor(prize, session) {
@@ -205,7 +220,8 @@ function yesterdaysGossip() {
   return fs.readFileSync(submissionFile, 'utf8').split('\n').filter(Boolean)
     .flatMap(line => { try { return [JSON.parse(line)]; } catch (_) { return []; } })
     .filter(entry => entry.submittedAt && new Date(entry.submittedAt).toLocaleDateString('en-CA') === yesterdayKey()
-      && ['sacrifice', 'notification'].includes(entry.kind))
+      && ['sacrifice', 'notification'].includes(entry.kind)
+      && decisionFor(entry) === 'approved')
     .map(entry => ({ id: entry.id || crypto.createHash('sha256').update(entry.submittedAt + entry.text).digest('hex'), text: entry.text }));
 }
 
@@ -287,6 +303,20 @@ io.on('connection', (socket) => {
     if (socket.data.role && socket.data.role !== 'admin') return reply({ ok: false, error: 'Already registered as another role.' });
     socket.data.role = 'admin';
     reply({ ok: true });
+  });
+  socket.on('admin-special-jackpot', ({ text, date } = {}, reply = () => {}) => {
+    if (!authorized(socket, 'admin')) return reply({ ok: false, error: 'Unauthorized.' });
+    if (typeof text !== 'string' || !text.trim() || text.length > 30000 ||
+        typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date))
+      return reply({ ok: false, error: 'Enter a story and a valid date.' });
+    if (persistent.jackpotDecisions[date])
+      return reply({ ok: false, error: 'A Jackpot has already been awarded or reserved for that date.' });
+    try {
+      const tmp = firstJackpotFile + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify({ text: text.trim(), date }), { mode: 0o600 });
+      fs.renameSync(tmp, firstJackpotFile);
+      reply({ ok: true });
+    } catch (error) { console.error(error); reply({ ok: false, error: 'Could not save story.' }); }
   });
   socket.on('admin-list', (_payload = {}, reply = () => {}) => {
     if (!authorized(socket, 'admin')) return reply({ ok: false, error: 'Unauthorized.' });
@@ -477,7 +507,8 @@ io.on('connection', (socket) => {
         const key = todayKey();
         const existing = persistent.jackpotDecisions[key];
         if (!existing) {
-          const items = yesterdaysGossip();
+          const special = firstJackpot();
+          const items = special ? [{ id: 'special-jackpot-' + key, text: special.text }] : yesterdaysGossip();
           session.jackpot = { key, items, choice: null };
           persistent.jackpotDecisions[key] = { status: 'reserved', token: session.token, items };
           saveState();

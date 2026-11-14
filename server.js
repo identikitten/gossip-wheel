@@ -342,6 +342,12 @@ io.on('connection', (socket) => {
       reply({ ok: false, error: 'Could not save moderation decision.' });
     }
   });
+  socket.on('preview-content', (_payload = {}, reply = () => {}) => {
+    if (socket.data.role !== 'tester') return reply({ ok: false, error: 'Unauthorized.' });
+    reply({ ok: true, lore: content.gossipLore, gossip: content.gossipPool,
+      questions: content.questions });
+  });
+
   socket.on('test-login', ({ password } = {}, reply = () => {}) => {
     if (!securePasswordMatch(password, TEST_PASSWORD)) return reply({ ok: false, error: 'Incorrect test password.' });
     if (socket.data.role && socket.data.role !== 'tester') return reply({ ok: false, error: 'Already registered as another role.' });
